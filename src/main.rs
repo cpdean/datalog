@@ -1,10 +1,19 @@
 use rustyline::error::ReadlineError;
 use rustyline::Editor;
 
-#[macro_use]
-extern crate nom;
+use nom::alpha;
+use nom::{complete, delimited, do_parse, named, one_of, tag, ws};
 
 named!(syntactic_keyword, tag!("else"));
+
+named!(lowercase_char<char>, one_of!("abcdefghijklmnopqrstuvwxyz"));
+named!(uppercase_char<char>, one_of!("ABCDEFGHIJKLMNOPQRSTUVWXYZ"));
+
+named!(identifier<&str>, do_parse!(lowercase_char, alpha));
+
+// fact := <ident>(<ident>)
+//ident, tag!("("), ident, tag!(")")
+//named!(fact, ws!(delimited!(ident, tag!("("), ident, tag!(")"))));
 
 fn parse(line: &str) {
     let res = syntactic_keyword(line.as_bytes());
