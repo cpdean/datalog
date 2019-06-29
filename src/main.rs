@@ -15,54 +15,9 @@ use rustyline::Editor;
 
 use regex::Regex;
 
-
-
 fn eval<T>(i: T) -> T {
     i
 }
-
-
-/*
-macro_rules! re_capture (
-  ($i:expr, $re:expr) => (
-    {
-      use $crate::lib::std::result::Result::*;
-      use $crate::{Err,error::ErrorKind,IResult};
-
-      use $crate::Slice;
-      let re = $crate::lib::regex::Regex::new($re).unwrap();
-      if let Some(c) = re.captures(&$i) {
-        let v:Vec<_> = c.iter().filter(|el| el.is_some()).map(|el| el.unwrap()).map(|m| $i.slice(m.start()..m.end())).collect();
-        let offset = {
-          let end = v.last().unwrap();
-          end.as_ptr() as usize + end.len() - $i.as_ptr() as usize
-        };
-        Ok(($i.slice(offset..), v))
-      } else {
-        let res: IResult<_,_> = Err(Err::Error(error_position!($i, ErrorKind::RegexpCapture)));
-        res
-      }
-    }
-  )
-);
-*/
-
-
-
-
-/*
-fn find_a(i: &str) -> IResult<&str, &str> {
-    let r = Regex::new("(a)").unwrap();
-    match r.captures(&i) {
-        Some(caps) => {
-            Ok((&i[0..1], &i[0..1]))
-        }
-        None => Err(ErrorKind::RegexpCapture)
-
-    }
-}
-
-*/
 
 
 // TODO: is there a way to make free_var's type signature only return Variable::Free?
@@ -123,23 +78,40 @@ enum Variable {
 }
 
 
+#[derive(Debug, PartialEq)]
 struct Fact {
     name: String,
     vars: Vec<Variable>
 }
 
+#[derive(Debug, PartialEq)]
 struct Rule {
     name: String,
     head: Vec<Variable>,
     body: Vec<Fact>,
 }
 
-/*
 // something(like, this)
-fn fact(i: &str) -> IResult<&Fact, &str> {
-    tuple(identifier, delimited(char!('('), arg_list, char!(')')))
+fn fact(i: &str) -> IResult<&str, Fact> {
+    match sequence::tuple((
+        identifier,
+        sequence::delimited(complete::tag("("), arg_list, complete::tag(")"))
+    ))(i) {
+        Ok((rest, (ident, args))) => {
+            // identifier will only ever be a "fixed" var
+            // i need to come up with a cleaner way to do this part
+            // maybe this is a red flag that i should not parse the 'business' val directly from
+            // the identifier parser?
+            let ident_str: String = match ident {
+                Variable::Fixed(s) => s,
+                // TODO: return an error not a panic on facts that have 'free' style names
+                Variable::Free(s) => panic!("{} parsed to 'free' var?", s),
+            };
+            Ok((rest, Fact{ name: ident_str, vars: args }))
+        },
+        Err(e) => Err(e)
+    }
 }
-*/
 
 fn main() {
     // `()` can be used when no completer is required
@@ -198,6 +170,15 @@ fn test_arg_list(){
     assert_eq!(Ok(("", vec![Fixed("za".to_owned()), Fixed("gg".to_owned())])), arg_list("za,gg"));
     assert_eq!(Ok(("", vec![Fixed("za".to_owned()), Fixed("gg".to_owned())])), arg_list("za, gg"));
     assert_eq!(Ok(("", vec![Fixed("za".to_owned()), Free("Gg".to_owned())])), arg_list("za, Gg"));
+}
+
+#[test]
+fn test_facts(){
+    use Variable::{Free, Fixed};
+    assert_eq!(Ok(("", Fact{ name:"something".to_owned(), vars: vec![Fixed("one".to_owned())]})), fact("something(one)"));
+    assert_eq!(Ok(("", Fact{ name:"something".to_owned(), vars: vec![Fixed("one".to_owned()), Fixed("two".to_owned())]})), fact("something(one, two)"));
+    assert_eq!(Ok(("", Fact{ name:"something".to_owned(), vars: vec![Fixed("one".to_owned()), Free("Two".to_owned())]})), fact("something(one, Two)"));
+    assert_eq!(Err(Err::Error((" something(one)", ErrorKind::RegexpCapture))), fact(" something(one)"));
 }
 
 
