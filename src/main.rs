@@ -71,23 +71,22 @@ fn arg_list(i: &str) -> IResult<&str, Vec<Variable>> {
     )(i)
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 enum Variable {
     Fixed(String),
     Free(String),
 }
 
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 struct Fact {
     name: String,
     vars: Vec<Variable>
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 struct Rule {
-    name: String,
-    head: Vec<Variable>,
+    head: Fact,
     body: Vec<Fact>,
 }
 
@@ -112,6 +111,34 @@ fn fact(i: &str) -> IResult<&str, Fact> {
         Err(e) => Err(e)
     }
 }
+
+// not going to enforce semantics of free vars yet, validate that later i guess
+// for now just trying to parse this structure:
+// cousin(X, Y) :- siblings(A, B), parent(A, X), parent(B, Y)
+fn rule(i: &str) -> IResult<&str, Rule> {
+    let the_rule = sequence::separated_pair(
+        sequence::preceded(nom::character::complete::multispace0, fact),
+        sequence::preceded(nom::character::complete::multispace0, complete::tag(":-")),
+        sequence::terminated(
+            separated_list(
+                sequence::preceded(nom::character::complete::multispace0, complete::tag(",")),
+                sequence::preceded(nom::character::complete::multispace0, fact),
+            ),
+            sequence::preceded(nom::character::complete::multispace0, complete::tag("."))
+        )
+    )(i);
+    match the_rule {
+        Ok((rest, (head, body))) => {
+            // identifier will only ever be a "fixed" var
+            // i need to come up with a cleaner way to do this part
+            // maybe this is a red flag that i should not parse the 'business' val directly from
+            // the identifier parser?
+            Ok((rest, Rule{ head: head, body: body }))
+        },
+        Err(e) => Err(e)
+    }
+}
+
 
 fn main() {
     // `()` can be used when no completer is required
@@ -181,6 +208,66 @@ fn test_facts(){
     assert_eq!(Err(Err::Error((" something(one)", ErrorKind::RegexpCapture))), fact(" something(one)"));
 }
 
+#[test]
+fn test_rules(){
+    use Variable::{Free, Fixed};
+    fn _free(n: &str) -> Variable {
+        Free(n.to_owned())
+    }
+    fn _fixed(n: &str) -> Variable {
+        Fixed(n.to_owned())
+    }
+    fn _fact(n: &str, a: Vec<Variable>) -> Fact {
+        Fact{ name: n.to_owned(), vars: a }
+    }
+    fn _rule(h: Fact, a: Vec<Fact>) -> Rule {
+        Rule { head: h, body: a }
+    }
+    // simple one-to-one relationship
+    assert_eq!(
+        Ok(("",
+            _rule(
+                _fact("good", vec![_fixed("one")]),
+                vec![
+                    _fact("gut", vec![_fixed("one")])
+               ])
+        )), rule("good(one) :- gut(one).")
+    );
+
+    // check if other fact related
+    assert_eq!(
+        Ok(("",
+            _rule(
+                _fact("good", vec![_fixed("one"), _free("Two")]),
+                vec![
+                    _fact("gut", vec![_fixed("one")]),
+                    _fact("foo", vec![_fixed("one"), _free("Two")])
+               ])
+        )), rule("good(one, Two) :- gut(one), foo(one, Two).")
+    );
+
+    // ensure formattiing parses to same obj
+    let check = _rule(
+        _fact("good", vec![_fixed("one"), _free("Two")]),
+        vec![
+            _fact("gut", vec![_fixed("one")]),
+            _fact("foo", vec![_fixed("one"), _free("Two")])
+        ]
+    );
+
+    assert_eq!(Ok(("", check.clone())), rule("good(one, Two) :- gut(one), foo(one, Two)."));
+    assert_eq!(Ok(("", check.clone())), rule("  good(one, Two) :- gut(one), foo(one, Two)."));
+    assert_eq!(Ok(("", check.clone())), rule("  good(  one,  Two)  :- gut(one), foo(one, Two)."));
+    assert_eq!(Ok(("", check.clone())), rule("  good(  one,  Two)  :-    gut( one)   , foo(    one, Two )  ."));
+
+
+
+    // TODO: thiis is a bad(opaque) error message
+    assert_eq!(Err(Err::Error(("", ErrorKind::Tag))), rule(" something(one)"));
+}
+
+
+// cousin(X, Y) :- siblings(A, B), parent(A, X), parent(B, Y)
 
 #[test]
 fn ugh(){
