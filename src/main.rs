@@ -65,18 +65,13 @@ fn find_a(i: &str) -> IResult<&str, &str> {
 */
 
 
-fn find_a(i: &str) -> IResult<&str, &str> {
-    let found = &i[0..1];
-    let rest = &i[1..2];
-    Ok((rest, found))
-}
-
-fn free_var(i: &str) -> IResult<&str, &str> {
+// TODO: is there a way to make free_var's type signature only return Variable::Free?
+fn free_var(i: &str) -> IResult<&str, Variable> {
     let re = Regex::new(r"^[A-Z]+\w*").unwrap();
     match re.find(i) {
         Some(m) => {
             let (s, e) = (m.start(), m.end());
-            Ok((&i[e..], &i[s..e]))
+            Ok((&i[e..], Variable::Free(i[s..e].to_owned())))
         },
         None => {
             let res: IResult<_,_> = Err(Err::Error(error_position!(i, ErrorKind::RegexpCapture)));
@@ -85,12 +80,12 @@ fn free_var(i: &str) -> IResult<&str, &str> {
     }
 }
 
-fn identifier(i: &str) -> IResult<&str, &str> {
+fn identifier(i: &str) -> IResult<&str, Variable> {
     let re = Regex::new(r"^[a-z]+\w*").unwrap();
     match re.find(i) {
         Some(m) => {
             let (s, e) = (m.start(), m.end());
-            Ok((&i[e..], &i[s..e]))
+            Ok((&i[e..], Variable::Fixed(i[s..e].to_owned())))
         },
         None => {
             let res: IResult<_,_> = Err(Err::Error(error_position!(i, ErrorKind::RegexpCapture)));
@@ -99,7 +94,7 @@ fn identifier(i: &str) -> IResult<&str, &str> {
     }
 }
 
-fn arg_list(i: &str) -> IResult<&str, Vec<&str>> {
+fn arg_list(i: &str) -> IResult<&str, Vec<Variable>> {
     let white_identifier = sequence::preceded(
         nom::character::complete::multispace0,
         sequence::terminated(
@@ -121,6 +116,7 @@ fn arg_list(i: &str) -> IResult<&str, Vec<&str>> {
     )(i)
 }
 
+#[derive(Debug, PartialEq)]
 enum Variable {
     Fixed(String),
     Free(String),
@@ -179,31 +175,29 @@ fn main() {
 }
 
 #[test]
-fn supfam(){
-    let a = find_a("ab");
-    assert_eq!(Ok(("b", "a")), a);
-}
-
-#[test]
 fn test_free_var(){
-    assert_eq!(Ok(("", "Za")), free_var("Za"));
-    assert_eq!(Ok((" goat", "Za")), free_var("Za goat"));
-    assert_eq!(Ok((" goat", "YUS")), free_var("YUS goat"));
+    use Variable::{Free, Fixed};
+    assert_eq!(Ok(("", Free("Za".to_owned()))), free_var("Za"));
+    assert_eq!(Ok((" goat", Free("Za".to_owned()))), free_var("Za goat"));
+    assert_eq!(Ok((" goat", Free("YUS".to_owned()))), free_var("YUS goat"));
     assert_eq!(Err(Err::Error(("yus goat", ErrorKind::RegexpCapture))), free_var("yus goat"));
 }
 
 #[test]
 fn test_identifier(){
-    assert_eq!(Ok(("", "za")), identifier("za"));
-    assert_eq!(Ok((" goat", "za")), identifier("za goat"));
+    use Variable::{Free, Fixed};
+    assert_eq!(Ok(("", Fixed("za".to_owned()))), identifier("za"));
+    assert_eq!(Ok((" goat", Fixed("za".to_owned()))), identifier("za goat"));
     assert_eq!(Err(Err::Error(("YUS goat", ErrorKind::RegexpCapture))), identifier("YUS goat"));
 }
 
 #[test]
 fn test_arg_list(){
-    assert_eq!(Ok(("", vec!["za"])), arg_list("za"));
-    assert_eq!(Ok(("", vec!["za", "gg"])), arg_list("za,gg"));
-    assert_eq!(Ok(("", vec!["za", "gg"])), arg_list("za, gg"));
+    use Variable::{Free, Fixed};
+    assert_eq!(Ok(("", vec![Fixed("za".to_owned())])), arg_list("za"));
+    assert_eq!(Ok(("", vec![Fixed("za".to_owned()), Fixed("gg".to_owned())])), arg_list("za,gg"));
+    assert_eq!(Ok(("", vec![Fixed("za".to_owned()), Fixed("gg".to_owned())])), arg_list("za, gg"));
+    assert_eq!(Ok(("", vec![Fixed("za".to_owned()), Free("Gg".to_owned())])), arg_list("za, Gg"));
 }
 
 
