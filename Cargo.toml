@@ -6,4 +6,10 @@ edition = "2018"
 
 [dependencies]
 rustyline = "4.1.0"
-nom = "4.2.3"
+# i can't figure out how to use regex in nom without breaking my editor
+regex = "1.1.7"
+
+
+[dependencies.nom]
+version = "5.0.0"
+features = ["regexp"]
