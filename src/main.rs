@@ -1,10 +1,14 @@
-#![allow(unused_imports)]
+#![allow(unused_imports,dead_code)]
 
 #[macro_use]
 extern crate nom;
 
 use nom::{IResult,Err};
 use nom::error::ErrorKind;
+use nom::multi::separated_list;
+use nom::bytes::{streaming,complete};
+use nom::branch::alt;
+use nom::sequence;
 
 use rustyline::error::ReadlineError;
 use rustyline::Editor;
@@ -95,6 +99,52 @@ fn identifier(i: &str) -> IResult<&str, &str> {
     }
 }
 
+fn arg_list(i: &str) -> IResult<&str, Vec<&str>> {
+    let white_identifier = sequence::preceded(
+        nom::character::complete::multispace0,
+        sequence::terminated(
+            identifier,
+            nom::character::complete::multispace0,
+        )
+    );
+
+    let white_free_var = sequence::preceded(
+        nom::character::complete::multispace0,
+        sequence::terminated(free_var,
+            nom::character::complete::multispace0,
+        )
+    );
+
+    separated_list(
+        complete::tag(","),
+        alt((white_identifier, white_free_var))
+    )(i)
+}
+
+enum Variable {
+    Fixed(String),
+    Free(String),
+}
+
+
+struct Fact {
+    name: String,
+    vars: Vec<Variable>
+}
+
+struct Rule {
+    name: String,
+    head: Vec<Variable>,
+    body: Vec<Fact>,
+}
+
+/*
+// something(like, this)
+fn fact(i: &str) -> IResult<&Fact, &str> {
+    tuple(identifier, delimited(char!('('), arg_list, char!(')')))
+}
+*/
+
 fn main() {
     // `()` can be used when no completer is required
     let mut rl = Editor::<()>::new();
@@ -148,6 +198,14 @@ fn test_identifier(){
     assert_eq!(Ok((" goat", "za")), identifier("za goat"));
     assert_eq!(Err(Err::Error(("YUS goat", ErrorKind::RegexpCapture))), identifier("YUS goat"));
 }
+
+#[test]
+fn test_arg_list(){
+    assert_eq!(Ok(("", vec!["za"])), arg_list("za"));
+    assert_eq!(Ok(("", vec!["za", "gg"])), arg_list("za,gg"));
+    assert_eq!(Ok(("", vec!["za", "gg"])), arg_list("za, gg"));
+}
+
 
 #[test]
 fn ugh(){
