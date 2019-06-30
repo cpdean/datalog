@@ -90,6 +90,12 @@ struct Rule {
     body: Vec<Fact>,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+enum Statement {
+    Rule(Rule),
+    Fact(Fact)
+}
+
 // something(like, this)
 fn fact(i: &str) -> IResult<&str, Fact> {
     match sequence::tuple((
@@ -112,10 +118,19 @@ fn fact(i: &str) -> IResult<&str, Fact> {
     }
 }
 
+// TODO: I don't like how i'm using fact to both mean a component in a rule but also a fact
+// persisted to the datalog engine
+fn fact_statement(i: &str) -> IResult<&str, Fact> {
+    sequence::terminated(
+        sequence::preceded(nom::character::complete::multispace0, fact),
+        sequence::preceded(nom::character::complete::multispace0, complete::tag("."))
+    )(i)
+}
+
 // not going to enforce semantics of free vars yet, validate that later i guess
 // for now just trying to parse this structure:
 // cousin(X, Y) :- siblings(A, B), parent(A, X), parent(B, Y)
-fn rule(i: &str) -> IResult<&str, Rule> {
+fn rule_statement(i: &str) -> IResult<&str, Rule> {
     let the_rule = sequence::separated_pair(
         sequence::preceded(nom::character::complete::multispace0, fact),
         sequence::preceded(nom::character::complete::multispace0, complete::tag(":-")),
@@ -137,6 +152,14 @@ fn rule(i: &str) -> IResult<&str, Rule> {
         },
         Err(e) => Err(e)
     }
+}
+
+
+fn statement(i: &str) -> IResult<&str, Statement> {
+    alt((
+        nom::combinator::map(rule_statement, |e| Statement::Rule(e)),
+        nom::combinator::map(fact_statement, |e| Statement::Fact(e))
+    ))(i)
 }
 
 
@@ -231,7 +254,7 @@ fn test_rules(){
                 vec![
                     _fact("gut", vec![_fixed("one")])
                ])
-        )), rule("good(one) :- gut(one).")
+        )), rule_statement("good(one) :- gut(one).")
     );
 
     // check if other fact related
@@ -243,7 +266,7 @@ fn test_rules(){
                     _fact("gut", vec![_fixed("one")]),
                     _fact("foo", vec![_fixed("one"), _free("Two")])
                ])
-        )), rule("good(one, Two) :- gut(one), foo(one, Two).")
+        )), rule_statement("good(one, Two) :- gut(one), foo(one, Two).")
     );
 
     // ensure formattiing parses to same obj
@@ -255,19 +278,35 @@ fn test_rules(){
         ]
     );
 
-    assert_eq!(Ok(("", check.clone())), rule("good(one, Two) :- gut(one), foo(one, Two)."));
-    assert_eq!(Ok(("", check.clone())), rule("  good(one, Two) :- gut(one), foo(one, Two)."));
-    assert_eq!(Ok(("", check.clone())), rule("  good(  one,  Two)  :- gut(one), foo(one, Two)."));
-    assert_eq!(Ok(("", check.clone())), rule("  good(  one,  Two)  :-    gut( one)   , foo(    one, Two )  ."));
+    assert_eq!(Ok(("", check.clone())), rule_statement("good(one, Two) :- gut(one), foo(one, Two)."));
+    assert_eq!(Ok(("", check.clone())), rule_statement("  good(one, Two) :- gut(one), foo(one, Two)."));
+    assert_eq!(Ok(("", check.clone())), rule_statement("  good(  one,  Two)  :- gut(one), foo(one, Two)."));
+    assert_eq!(Ok(("", check.clone())), rule_statement("  good(  one,  Two)  :-    gut( one)   , foo(    one, Two )  ."));
 
 
 
     // TODO: thiis is a bad(opaque) error message
-    assert_eq!(Err(Err::Error(("", ErrorKind::Tag))), rule(" something(one)"));
+    assert_eq!(Err(Err::Error(("", ErrorKind::Tag))), rule_statement(" something(one)"));
 }
 
+#[test]
+fn test_rule_statement(){
+    let (correct, result) = match statement("f(a) :- g(a).") {
+        Ok((rest, Statement::Rule(r))) => (true, Ok((rest, Statement::Rule(r)))),
+        x => (false, x)
+    };
+    assert!(correct, "was not rule {:?}", result);
+}
 
-// cousin(X, Y) :- siblings(A, B), parent(A, X), parent(B, Y)
+#[test]
+fn test_fact_statement(){
+    let (correct, result) = match statement("f(a).") {
+        Ok((rest, Statement::Fact(f))) => (true, Ok((rest, Statement::Fact(f)))),
+        x => (false, x)
+    };
+    assert!(correct, "was not fact {:#?}", result);
+}
+
 
 #[test]
 fn ugh(){
