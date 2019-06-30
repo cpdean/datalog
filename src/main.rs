@@ -9,6 +9,7 @@ use nom::multi::separated_list;
 use nom::bytes::{streaming,complete};
 use nom::branch::alt;
 use nom::sequence;
+use nom::combinator::map;
 
 use rustyline::error::ReadlineError;
 use rustyline::Editor;
@@ -77,6 +78,20 @@ enum Variable {
     Free(String),
 }
 
+// like "x = Foo" in rule predicates
+#[derive(Clone, Debug, PartialEq)]
+struct EqualityConstraint {
+    equals: bool,
+    left: Variable,
+    right: Variable,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+enum BodyExpression {
+    Fact(Fact),
+    Equals(EqualityConstraint),
+}
+
 
 #[derive(Clone, Debug, PartialEq)]
 struct Fact {
@@ -87,13 +102,29 @@ struct Fact {
 #[derive(Clone, Debug, PartialEq)]
 struct Rule {
     head: Fact,
-    body: Vec<Fact>,
+    body: Vec<BodyExpression>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 enum Statement {
     Rule(Rule),
     Fact(Fact)
+}
+
+fn equality_constraint(i: &str) -> IResult<&str, EqualityConstraint> {
+    nom::combinator::map(
+        sequence::tuple((
+            alt((free_var, identifier)),
+            sequence::preceded(nom::character::complete::multispace0,
+                nom::combinator::map(
+                    alt((complete::tag("="), complete::tag("!="))), |e| e == "=")
+            ),
+            sequence::preceded(nom::character::complete::multispace0,
+                alt((free_var, identifier))
+            ),
+        )),
+        |(left, op, right)| EqualityConstraint { left: left, equals: op, right: right }
+    )(i)
 }
 
 // something(like, this)
@@ -131,13 +162,22 @@ fn fact_statement(i: &str) -> IResult<&str, Fact> {
 // for now just trying to parse this structure:
 // cousin(X, Y) :- siblings(A, B), parent(A, X), parent(B, Y)
 fn rule_statement(i: &str) -> IResult<&str, Rule> {
+    let either_predicate_or_equality_constraint =
+        sequence::preceded(
+            nom::character::complete::multispace0,
+            alt((
+                map(fact, |f| BodyExpression::Fact(f)),
+                map(equality_constraint, |e| BodyExpression::Equals(e))
+            ))
+        );
+
     let the_rule = sequence::separated_pair(
         sequence::preceded(nom::character::complete::multispace0, fact),
         sequence::preceded(nom::character::complete::multispace0, complete::tag(":-")),
         sequence::terminated(
             separated_list(
                 sequence::preceded(nom::character::complete::multispace0, complete::tag(",")),
-                sequence::preceded(nom::character::complete::multispace0, fact),
+                either_predicate_or_equality_constraint
             ),
             sequence::preceded(nom::character::complete::multispace0, complete::tag("."))
         )
@@ -232,8 +272,24 @@ fn test_facts(){
 }
 
 #[test]
+fn test_equality_constraint() {
+    use Variable::{Free, Fixed};
+    fn _free(n: &str) -> Variable {
+        Free(n.to_owned())
+    }
+    fn _fixed(n: &str) -> Variable {
+        Fixed(n.to_owned())
+    }
+    assert_eq!(Ok(("", EqualityConstraint{ left: _fixed("za") , equals: true , right: _fixed("za") } )), equality_constraint("za = za"));
+    assert_eq!(Ok(("", EqualityConstraint{ left: _free("Aa") , equals: true , right: _fixed("za") } )), equality_constraint("Aa = za"));
+    assert_eq!(Ok(("", EqualityConstraint{ left: _free("Aa") , equals: true , right: _fixed("za") } )), equality_constraint("Aa =  za"));
+    assert_eq!(Ok(("", EqualityConstraint{ left: _free("Aa") , equals: false , right: _free("Za") } )), equality_constraint("Aa != Za"));
+}
+
+#[test]
 fn test_rules(){
     use Variable::{Free, Fixed};
+    use BodyExpression::{Equals as BE, Fact as BF};
     fn _free(n: &str) -> Variable {
         Free(n.to_owned())
     }
@@ -243,7 +299,7 @@ fn test_rules(){
     fn _fact(n: &str, a: Vec<Variable>) -> Fact {
         Fact{ name: n.to_owned(), vars: a }
     }
-    fn _rule(h: Fact, a: Vec<Fact>) -> Rule {
+    fn _rule(h: Fact, a: Vec<BodyExpression>) -> Rule {
         Rule { head: h, body: a }
     }
     // simple one-to-one relationship
@@ -252,7 +308,7 @@ fn test_rules(){
             _rule(
                 _fact("good", vec![_fixed("one")]),
                 vec![
-                    _fact("gut", vec![_fixed("one")])
+                    BF(_fact("gut", vec![_fixed("one")]))
                ])
         )), rule_statement("good(one) :- gut(one).")
     );
@@ -263,18 +319,31 @@ fn test_rules(){
             _rule(
                 _fact("good", vec![_fixed("one"), _free("Two")]),
                 vec![
-                    _fact("gut", vec![_fixed("one")]),
-                    _fact("foo", vec![_fixed("one"), _free("Two")])
+                    BF(_fact("gut", vec![_fixed("one")])),
+                    BF(_fact("foo", vec![_fixed("one"), _free("Two")]))
                ])
         )), rule_statement("good(one, Two) :- gut(one), foo(one, Two).")
+    );
+
+    // add equality check predicate test, for expressions like x = y, x != z.
+    assert_eq!(
+        Ok(("",
+            _rule(
+                _fact("good", vec![_fixed("one"), _free("Two")]),
+                vec![
+                    BF(_fact("gut", vec![_fixed("one")])),
+                    BF(_fact("foo", vec![_fixed("one"), _free("Two")])),
+                    BE(EqualityConstraint{ left: _fixed("one"), equals: true, right: _free("Two") })
+               ])
+        )), rule_statement("good(one, Two) :- gut(one), foo(one, Two), one = Two.")
     );
 
     // ensure formattiing parses to same obj
     let check = _rule(
         _fact("good", vec![_fixed("one"), _free("Two")]),
         vec![
-            _fact("gut", vec![_fixed("one")]),
-            _fact("foo", vec![_fixed("one"), _free("Two")])
+            BF(_fact("gut", vec![_fixed("one")])),
+            BF(_fact("foo", vec![_fixed("one"), _free("Two")]))
         ]
     );
 
