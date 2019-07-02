@@ -9,6 +9,10 @@ rustyline = "4.1.0"
 # i can't figure out how to use regex in nom without breaking my editor
 regex = "1.1.7"
 
+[[bin]]
+path = "src/main.rs"
+name = "datalog"
+
 
 [dependencies.nom]
 version = "5.0.0"
