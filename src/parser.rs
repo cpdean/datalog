@@ -8,15 +8,9 @@ use nom::branch::alt;
 use nom::sequence;
 use nom::combinator::map;
 
-use rustyline::error::ReadlineError;
-use rustyline::Editor;
-
 use regex::Regex;
 
-fn eval<T>(i: T) -> T {
-    i
-}
-
+use crate::ast::{Variable, Fact, Rule, BodyExpression, EqualityConstraint, Statement};
 
 // TODO: is there a way to make free_var's type signature only return Variable::Free?
 fn free_var(i: &str) -> IResult<&str, Variable> {
@@ -69,45 +63,6 @@ fn arg_list(i: &str) -> IResult<&str, Vec<Variable>> {
     )(i)
 }
 
-#[derive(Clone, Debug, PartialEq)]
-enum Variable {
-    Fixed(String),
-    Free(String),
-}
-
-// like "x = Foo" in rule predicates
-#[derive(Clone, Debug, PartialEq)]
-struct EqualityConstraint {
-    equals: bool,
-    left: Variable,
-    right: Variable,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-enum BodyExpression {
-    Fact(Fact),
-    Equals(EqualityConstraint),
-}
-
-
-#[derive(Clone, Debug, PartialEq)]
-struct Fact {
-    name: String,
-    vars: Vec<Variable>
-}
-
-#[derive(Clone, Debug, PartialEq)]
-struct Rule {
-    head: Fact,
-    body: Vec<BodyExpression>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-enum Statement {
-    Rule(Rule),
-    Fact(Fact)
-}
-
 fn equality_constraint(i: &str) -> IResult<&str, EqualityConstraint> {
     nom::combinator::map(
         sequence::tuple((
@@ -155,6 +110,14 @@ fn fact_statement(i: &str) -> IResult<&str, Fact> {
     )(i)
 }
 
+fn query_statement(i: &str) -> IResult<&str, Fact> {
+    sequence::terminated(
+        sequence::preceded(nom::character::complete::multispace0, fact),
+        sequence::preceded(nom::character::complete::multispace0, complete::tag("?"))
+    )(i)
+}
+
+
 // not going to enforce semantics of free vars yet, validate that later i guess
 // for now just trying to parse this structure:
 // cousin(X, Y) :- siblings(A, B), parent(A, X), parent(B, Y)
@@ -195,7 +158,8 @@ fn rule_statement(i: &str) -> IResult<&str, Rule> {
 fn statement(i: &str) -> IResult<&str, Statement> {
     alt((
         nom::combinator::map(rule_statement, |e| Statement::Rule(e)),
-        nom::combinator::map(fact_statement, |e| Statement::Fact(e))
+        nom::combinator::map(fact_statement, |e| Statement::Fact(e)),
+        nom::combinator::map(query_statement, |e| Statement::Query(e)),
     ))(i)
 }
 
@@ -335,6 +299,15 @@ fn test_rule_statement(){
 fn test_fact_statement(){
     let (correct, result) = match statement("f(a).") {
         Ok((rest, Statement::Fact(f))) => (true, Ok((rest, Statement::Fact(f)))),
+        x => (false, x)
+    };
+    assert!(correct, "was not fact {:#?}", result);
+}
+
+#[test]
+fn test_query_statement(){
+    let (correct, result) = match statement("f(a)?") {
+        Ok((rest, Statement::Query(q))) => (true, Ok((rest, Statement::Query(q)))),
         x => (false, x)
     };
     assert!(correct, "was not fact {:#?}", result);

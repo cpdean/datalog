@@ -1,11 +1,7 @@
 #![allow(unused_imports,dead_code)]
 
-#[macro_use]
-extern crate nom;
-
 use rustyline::error::ReadlineError;
 use rustyline::Editor;
-mod parser;
 
 fn eval<T>(i: T) -> T {
     i
