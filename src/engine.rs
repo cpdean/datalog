@@ -4,67 +4,85 @@ extern crate time;
 
 use rusqlite::types::ToSql;
 use rusqlite::{params, Connection, Result as SQLResult};
+use std::io::Error;
 use time::Timespec;
 
 /*
  * stores the datalog facts and lets you query them
  */
 use crate::ast::{
-    Fact,
-    Rule,
-    BodyExpression,
-    EqualityConstraint,
-    Statement,
-    Variable::Free,
-    Variable::Fixed,
+    BodyExpression, EqualityConstraint, Fact, Rule, Statement, Variable::Fixed, Variable::Free,
 };
 
-pub struct Engine {
+trait DatalogEngine {
+    fn push_fact(&mut self, fact: Statement) -> Result<(), String>;
+    fn push_rule(&mut self, rule: Statement) -> Result<(), String>;
+    fn query(&self, query: Fact) -> Result<Option<Vec<Fact>>, String>;
+}
+
+/// RustEngine is a datalog engine that implements its internals via loops and stuff in Rust
+pub struct RustEngine {
     facts: Vec<Fact>,
     rules: Vec<Rule>,
 }
 
-impl Engine {
-    // checks if the fact is present in the engine, referencing literal facts and traversing
-    // stored rules
-    pub fn query(&self, q: &Fact) -> Vec<&Fact> {
-        if let Some(i) = self.facts.iter().find(|&e| e == q) {
-            return vec![i];
-        } else {
-            return vec![];
+impl DatalogEngine for RustEngine {
+    fn push_fact(&mut self, fact: Statement) -> Result<(), String> {
+        match fact {
+            Statement::Fact(f) => {
+                self.facts.push(f);
+                Ok(())
+            }
+            Statement::Rule(_) | Statement::Query(_) => {
+                Err("only accepts fact statements".to_string())
+            }
         }
     }
 
-    pub fn push(&mut self, s: Statement) -> Result<(), String> {
-        match s {
-            Statement::Fact(f) => self.facts.push(f),
-            Statement::Rule(r) => self.rules.push(r),
-            Statement::Query(q) => {
-                return Err(format!("You cannot save queries to the engine: {:?}", q));
+    fn push_rule(&mut self, rule: Statement) -> Result<(), String> {
+        match rule {
+            Statement::Rule(r) => {
+                self.rules.push(r);
+                Ok(())
+            }
+            Statement::Fact(_) | Statement::Query(_) => {
+                Err("only accepts rule statements".to_string())
             }
         }
-        Ok(())
+    }
+
+    fn query(&self, query: Fact) -> Result<Option<Vec<Fact>>, String> {
+        let generated_facts = self.facts.clone();
+        let results = generated_facts
+            .iter()
+            .filter(|e| query == **e)
+            .map(|e| e.clone())
+            .collect();
+        Ok(Some(results))
     }
 }
 
 #[test]
 fn single_check() {
-    let mut e = Engine {
+    let mut e = RustEngine {
         facts: vec![],
         rules: vec![],
     };
-    e.push(Statement::Fact(Fact {
+    e.push_fact(Statement::Fact(Fact {
         name: "foo".to_owned(),
         vars: vec![Fixed("bar".to_owned())],
     }))
     .unwrap();
-    let r = e.query(&Fact {
+    let q = Fact {
         name: "foo".to_owned(),
         vars: vec![Fixed("bar".to_owned())],
-    });
+    };
+
+    let r = e.query(q).unwrap().unwrap();
     assert_eq!(r.len(), 1);
 }
 
+// TODO: these are just some tests to play around with rusqlite
 #[derive(Debug)]
 struct Person {
     id: i32,
