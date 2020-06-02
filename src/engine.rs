@@ -26,6 +26,24 @@ pub struct RustEngine {
     rules: Vec<Rule>,
 }
 
+impl RustEngine {
+    /// For when the query asks for an exact record
+    fn filter_exact_match(&self, query: Fact) -> Vec<Fact> {
+        self.facts
+            .iter()
+            .filter(|e| query == **e)
+            .map(|e| e.clone())
+            .collect()
+    }
+
+    fn get_relation(&self, name: &str, column_count: usize) -> Vec<&Fact> {
+        self.facts
+            .iter()
+            .filter(|r| r.name == name && r.vars.len() == column_count)
+            .collect()
+    }
+}
+
 impl DatalogEngine for RustEngine {
     fn push_fact(&mut self, fact: Statement) -> Result<(), String> {
         match fact {
@@ -52,18 +70,52 @@ impl DatalogEngine for RustEngine {
     }
 
     fn query(&self, query: Fact) -> Result<Option<Vec<Fact>>, String> {
-        let generated_facts = self.facts.clone();
-        let results = generated_facts
-            .iter()
-            .filter(|e| query == **e)
-            .map(|e| e.clone())
-            .collect();
-        Ok(Some(results))
+        if query.vars.iter().all(|v| match v {
+            Fixed(_) => true,
+            Free(_) => false,
+        }) {
+            Ok(Some(self.filter_exact_match(query)))
+        } else {
+            let mut results = vec![];
+            for record in self.get_relation(&query.name, query.vars.len()) {
+                // TODO: forget about free vars matching lol. just pretend each free var is a wildcard
+                // pairwise comparison of each side
+                let mut record_matches = true;
+                for (q, r) in query.vars.iter().zip(&record.vars) {
+                    match q {
+                        v @ Fixed(_) => {
+                            if v != r {
+                                record_matches = false;
+                            }
+                        }
+                        v @ &Fixed(_) => {
+                            if v != r {
+                                record_matches = false;
+                            }
+                        }
+                        _v @ Free(_) => {
+                            // TODO: somehow trace the freevars.  this has to work both within the same relation but also across relations (joins)
+                            continue;
+                        }
+                    }
+                }
+                if record_matches {
+                    results.push(record.clone());
+                }
+            }
+            Ok(Some(results))
+        }
     }
 }
 
 #[test]
 fn single_check() {
+    /*
+    check if a single fact gets stored
+    > foo(bar).
+    > foo(bar)?
+    foo(bar).
+    */
     let mut e = RustEngine {
         facts: vec![],
         rules: vec![],
@@ -80,6 +132,46 @@ fn single_check() {
 
     let r = e.query(q).unwrap().unwrap();
     assert_eq!(r.len(), 1);
+}
+
+#[test]
+fn query_with_free_var() {
+    /*
+    query for a subset of the facts in a database
+    > edge(a, b).
+    > edge(a, c).
+    > edge(b, d).
+    > edge(a, X)?
+    edge(a, b).
+    edge(a, c).
+    */
+    let mut e = RustEngine {
+        facts: vec![],
+        rules: vec![],
+    };
+    e.push_fact(Statement::Fact(Fact {
+        name: "edge".to_owned(),
+        vars: vec![Fixed("a".to_owned()), Fixed("b".to_owned())],
+    }))
+    .unwrap();
+    e.push_fact(Statement::Fact(Fact {
+        name: "edge".to_owned(),
+        vars: vec![Fixed("a".to_owned()), Fixed("c".to_owned())],
+    }))
+    .unwrap();
+    e.push_fact(Statement::Fact(Fact {
+        name: "edge".to_owned(),
+        vars: vec![Fixed("b".to_owned()), Fixed("d".to_owned())],
+    }))
+    .unwrap();
+
+    let query = Fact {
+        name: "edge".to_owned(),
+        vars: vec![Fixed("a".to_owned()), Free("X".to_owned())],
+    };
+
+    let r = e.query(query).unwrap().unwrap();
+    assert_eq!(r.len(), 2);
 }
 
 // TODO: these are just some tests to play around with rusqlite
