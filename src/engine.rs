@@ -11,12 +11,13 @@ use time::Timespec;
  * stores the datalog facts and lets you query them
  */
 use crate::ast::{
-    BodyExpression, EqualityConstraint, Fact, Rule, Statement, Variable::Fixed, Variable::Free,
+    BodyExpression, EqualityConstraint, Fact, Rule, Statement, Variable, Variable::Fixed,
+    Variable::Free,
 };
 
 trait DatalogEngine {
-    fn push_fact(&mut self, fact: Statement) -> Result<(), String>;
-    fn push_rule(&mut self, rule: Statement) -> Result<(), String>;
+    fn push_fact(&mut self, fact: Fact) -> Result<(), String>;
+    fn push_rule(&mut self, rule: Rule) -> Result<(), String>;
     fn query(&self, query: Fact) -> Result<Option<Vec<Fact>>, String>;
 }
 
@@ -45,28 +46,14 @@ impl RustEngine {
 }
 
 impl DatalogEngine for RustEngine {
-    fn push_fact(&mut self, fact: Statement) -> Result<(), String> {
-        match fact {
-            Statement::Fact(f) => {
-                self.facts.push(f);
-                Ok(())
-            }
-            Statement::Rule(_) | Statement::Query(_) => {
-                Err("only accepts fact statements".to_string())
-            }
-        }
+    fn push_fact(&mut self, fact: Fact) -> Result<(), String> {
+        self.facts.push(fact);
+        Ok(())
     }
 
-    fn push_rule(&mut self, rule: Statement) -> Result<(), String> {
-        match rule {
-            Statement::Rule(r) => {
-                self.rules.push(r);
+    fn push_rule(&mut self, rule: Rule) -> Result<(), String> {
+                self.rules.push(rule);
                 Ok(())
-            }
-            Statement::Fact(_) | Statement::Query(_) => {
-                Err("only accepts rule statements".to_string())
-            }
-        }
     }
 
     fn query(&self, query: Fact) -> Result<Option<Vec<Fact>>, String> {
@@ -88,11 +75,6 @@ impl DatalogEngine for RustEngine {
                                 record_matches = false;
                             }
                         }
-                        v @ &Fixed(_) => {
-                            if v != r {
-                                record_matches = false;
-                            }
-                        }
                         _v @ Free(_) => {
                             // TODO: somehow trace the freevars.  this has to work both within the same relation but also across relations (joins)
                             continue;
@@ -108,70 +90,150 @@ impl DatalogEngine for RustEngine {
     }
 }
 
-#[test]
-fn single_check() {
-    /*
-    check if a single fact gets stored
-    > foo(bar).
-    > foo(bar)?
-    foo(bar).
-    */
-    let mut e = RustEngine {
-        facts: vec![],
-        rules: vec![],
-    };
-    e.push_fact(Statement::Fact(Fact {
-        name: "foo".to_owned(),
-        vars: vec![Fixed("bar".to_owned())],
-    }))
-    .unwrap();
-    let q = Fact {
-        name: "foo".to_owned(),
-        vars: vec![Fixed("bar".to_owned())],
-    };
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    let r = e.query(q).unwrap().unwrap();
-    assert_eq!(r.len(), 1);
-}
+    fn v(vs: Vec<&str>) -> Vec<Variable> {
+        vs.iter()
+            .map(|e| {
+                if e.chars().next().unwrap().is_uppercase() {
+                    Free(e.to_string())
+                } else {
+                    Fixed(e.to_string())
+                }
+            })
+            .collect()
+    }
 
-#[test]
-fn query_with_free_var() {
-    /*
-    query for a subset of the facts in a database
-    > edge(a, b).
-    > edge(a, c).
-    > edge(b, d).
-    > edge(a, X)?
-    edge(a, b).
-    edge(a, c).
-    */
-    let mut e = RustEngine {
-        facts: vec![],
-        rules: vec![],
-    };
-    e.push_fact(Statement::Fact(Fact {
-        name: "edge".to_owned(),
-        vars: vec![Fixed("a".to_owned()), Fixed("b".to_owned())],
-    }))
-    .unwrap();
-    e.push_fact(Statement::Fact(Fact {
-        name: "edge".to_owned(),
-        vars: vec![Fixed("a".to_owned()), Fixed("c".to_owned())],
-    }))
-    .unwrap();
-    e.push_fact(Statement::Fact(Fact {
-        name: "edge".to_owned(),
-        vars: vec![Fixed("b".to_owned()), Fixed("d".to_owned())],
-    }))
-    .unwrap();
+    fn rule(head: Fact, facts: Vec<Fact>) -> Rule {
+        Rule {
+            head: head,
+            body: facts.into_iter().map(|e| BodyExpression::Fact(e)).collect()
+        }
+    }
 
-    let query = Fact {
-        name: "edge".to_owned(),
-        vars: vec![Fixed("a".to_owned()), Free("X".to_owned())],
-    };
+    fn fact(name: &str, vars: Vec<&str>) -> Fact {
+        Fact {
+            name: name.to_string(),
+            vars: v(vars),
+        }
+    }
 
-    let r = e.query(query).unwrap().unwrap();
-    assert_eq!(r.len(), 2);
+    fn query(name: &str, vars: Vec<&str>) -> Fact {
+        Fact {
+            name: name.to_string(),
+            vars: v(vars),
+        }
+    }
+
+    #[test]
+    fn single_check() {
+        /*
+        check if a single fact gets stored
+        > foo(bar).
+        > foo(bar)?
+        foo(bar).
+        */
+        let mut e = RustEngine {
+            facts: vec![],
+            rules: vec![],
+        };
+
+        e.push_fact(fact("foo", vec!["bar"])).unwrap();
+        let q = query("foo", vec!["bar"]);
+
+        let r = e.query(q).unwrap().unwrap();
+        assert_eq!(r.len(), 1);
+    }
+
+    #[test]
+    fn query_with_free_var() {
+        /*
+        query for a subset of the facts in a database
+        > edge(a, b).
+        > edge(a, c).
+        > edge(b, d).
+        > edge(a, X)?
+        edge(a, b).
+        edge(a, c).
+        */
+        let mut e = RustEngine {
+            facts: vec![],
+            rules: vec![],
+        };
+        e.push_fact(fact("edge", vec!["a", "b"])).unwrap();
+        e.push_fact(fact("edge", vec!["a", "c"])).unwrap();
+        e.push_fact(fact("edge", vec!["b", "d"])).unwrap();
+
+        let q = query("edge", vec!["a", "X"]);
+
+        let r = e.query(q).unwrap().unwrap();
+        assert_eq!(r.len(), 2);
+    }
+
+    #[test]
+    fn query_with_free_var_2() {
+        /*
+        same as above but just changing things around to see if it still works
+        > edge(a, b).
+        > edge(a, c).
+        > edge(b, d).
+        > edge(c, d).
+        > edge(j, d).
+        > edge(X, d)?
+        edge(b, d).
+        edge(c, d).
+        edge(j, d).
+        */
+        let mut e = RustEngine {
+            facts: vec![],
+            rules: vec![],
+        };
+
+        e.push_fact(fact("edge", vec!["a", "b"])).unwrap();
+        e.push_fact(fact("edge", vec!["a", "c"])).unwrap();
+        e.push_fact(fact("edge", vec!["b", "d"])).unwrap();
+        e.push_fact(fact("edge", vec!["c", "d"])).unwrap();
+        e.push_fact(fact("edge", vec!["j", "d"])).unwrap();
+
+        let q = query("edge", vec!["X", "d"]);
+
+        let r = e.query(q).unwrap().unwrap();
+        assert_eq!(r.len(), 3);
+    }
+
+    #[test]
+    fn test_rule_projects_new_relation() {
+        /*
+        A simple rule can project relations backed by concrete facts into a new relation of inferred facts
+        > % first add some facts
+        > foo(a).
+        > foo(b).
+        > foo(c).
+        > % make a rule to project all 'foo' into a 'bar' relation
+        > bar(X) :- foo(X).
+        > % query for all bar
+        > bar(Q)?
+        bar(a).
+        bar(b).
+        bar(c).
+        */
+
+        let mut e = RustEngine {
+            facts: vec![],
+            rules: vec![],
+        };
+        e.push_fact(fact("foo", vec!["a"])).unwrap();
+        e.push_fact(fact("foo", vec!["b"])).unwrap();
+        e.push_fact(fact("foo", vec!["c"])).unwrap();
+        e.push_rule(rule(fact("bar", vec!["X"]), vec![fact("foo", vec!["X"])])).unwrap();
+
+        let q = query("edge", vec!["a", "X"]);
+
+        let r = e.query(q).unwrap().unwrap();
+        assert_eq!(r.len(), 2);
+    }
 }
 
 // TODO: these are just some tests to play around with rusqlite
