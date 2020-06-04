@@ -72,7 +72,15 @@ impl RustEngine {
     }
 
     fn select_from_rule(&self, query: Fact) -> Vec<Fact> {
-        vec![]
+        let matching_rules = self.rules.iter().filter(|r| r.head.name == query.name && r.head.vars.len() == query.vars.len()).collect::<Vec<_>>();
+        // TODO: hardcode bodies to be only 1 fact for now
+        // bar(X) :- foo(X).
+        let r = matching_rules[0];
+        let r_fact = match &r.body[0] {
+            BodyExpression::Fact(f) => f,
+            BodyExpression::Equals(_) => panic!("no idea how to deal with eq body rules"),
+        };
+        self.select(r_fact.clone())
     }
 }
 
@@ -255,10 +263,10 @@ mod tests {
         e.push_rule(rule(fact("bar", vec!["X"]), vec![fact("foo", vec!["X"])]))
             .unwrap();
 
-        let q = query("edge", vec!["a", "X"]);
+        let q = query("bar", vec!["X"]);
 
         let r = e.query(q).unwrap().unwrap();
-        assert_eq!(r.len(), 2);
+        assert_eq!(r.len(), 3);
     }
 }
 
