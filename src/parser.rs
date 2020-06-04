@@ -21,7 +21,7 @@ fn free_var(i: &str) -> IResult<&str, Variable> {
             Ok((&i[e..], Variable::Free(i[s..e].to_owned())))
         },
         None => {
-            let res: IResult<_,_> = Err(Err::Error(error_position!(i, ErrorKind::RegexpCapture)));
+            let res: IResult<_,_> = Err(Err::Error(nom::error_position!(i, ErrorKind::RegexpCapture)));
             res
         }
     }
@@ -35,7 +35,7 @@ fn identifier(i: &str) -> IResult<&str, Variable> {
             Ok((&i[e..], Variable::Fixed(i[s..e].to_owned())))
         },
         None => {
-            let res: IResult<_,_> = Err(Err::Error(error_position!(i, ErrorKind::RegexpCapture)));
+            let res: IResult<_,_> = Err(Err::Error(nom::error_position!(i, ErrorKind::RegexpCapture)));
             res
         }
     }

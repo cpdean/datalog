@@ -89,19 +89,7 @@ impl DatalogEngine for RustEngine {
     }
 
     fn query(&self, query: Fact) -> Result<Option<Vec<Fact>>, String> {
-        let _e = dbg!(1);
-        /*
-        error: unexpected end of macro invocation
-        --> src/engine.rs:92:24
-        |
-        92 |         let _e = dbg!(1);
-        |                        ^ missing tokens in macro arguments
-
-        error: aborting due to previous error
-
-        error: could not compile `datalog`.
-        */
-        dbg!(self.rules);
+        dbg!(&self.rules);
         if self.rules.iter().any(|r| r.head.name == query.name) {
             // run the query using the rule's body, which may select from other
             // relations, compute a join, or recursively call itself or other
