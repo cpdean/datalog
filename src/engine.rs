@@ -43,49 +43,86 @@ impl RustEngine {
             .filter(|r| r.name == name && r.vars.len() == column_count)
             .collect()
     }
+
+    // pulls records of a relation, leaving filtering on fixed vars
+    fn select(&self, query: Fact) -> Vec<Fact> {
+        let mut results = vec![];
+        for record in self.get_relation(&query.name, query.vars.len()) {
+            // TODO: forget about free vars matching lol. just pretend each free var is a wildcard
+            // pairwise comparison of each side
+            let mut record_matches = true;
+            for (q, r) in query.vars.iter().zip(&record.vars) {
+                match q {
+                    v @ Fixed(_) => {
+                        if v != r {
+                            record_matches = false;
+                        }
+                    }
+                    _v @ Free(_) => {
+                        // TODO: somehow trace the freevars.  this has to work both within the same relation but also across relations (joins)
+                        continue;
+                    }
+                }
+            }
+            if record_matches {
+                results.push(record.clone());
+            }
+        }
+        results
+    }
+
+    fn select_from_rule(&self, query: Fact) -> Vec<Fact> {
+        vec![]
+    }
 }
 
 impl DatalogEngine for RustEngine {
+    // TODO: add constraint to make sure a rule and a fact cannot have the same name
     fn push_fact(&mut self, fact: Fact) -> Result<(), String> {
         self.facts.push(fact);
         Ok(())
     }
 
     fn push_rule(&mut self, rule: Rule) -> Result<(), String> {
-                self.rules.push(rule);
-                Ok(())
+        self.rules.push(rule);
+        Ok(())
     }
 
     fn query(&self, query: Fact) -> Result<Option<Vec<Fact>>, String> {
-        if query.vars.iter().all(|v| match v {
-            Fixed(_) => true,
-            Free(_) => false,
-        }) {
-            Ok(Some(self.filter_exact_match(query)))
-        } else {
-            let mut results = vec![];
-            for record in self.get_relation(&query.name, query.vars.len()) {
-                // TODO: forget about free vars matching lol. just pretend each free var is a wildcard
-                // pairwise comparison of each side
-                let mut record_matches = true;
-                for (q, r) in query.vars.iter().zip(&record.vars) {
-                    match q {
-                        v @ Fixed(_) => {
-                            if v != r {
-                                record_matches = false;
-                            }
-                        }
-                        _v @ Free(_) => {
-                            // TODO: somehow trace the freevars.  this has to work both within the same relation but also across relations (joins)
-                            continue;
-                        }
-                    }
-                }
-                if record_matches {
-                    results.push(record.clone());
-                }
+        let _e = dbg!(1);
+        /*
+        error: unexpected end of macro invocation
+        --> src/engine.rs:92:24
+        |
+        92 |         let _e = dbg!(1);
+        |                        ^ missing tokens in macro arguments
+
+        error: aborting due to previous error
+
+        error: could not compile `datalog`.
+        */
+        dbg!(self.rules);
+        if self.rules.iter().any(|r| r.head.name == query.name) {
+            // run the query using the rule's body, which may select from other
+            // relations, compute a join, or recursively call itself or other
+            // rules
+            Ok(Some(self.select_from_rule(query)))
+        } else if self.facts.iter().any(|f| f.name == query.name) {
+            // the query matches a concrete relation
+            // TODO: does datalog's spec allow you to add a fact and then also add a rule so that the rule
+            // yields both that single result plus whatever the other definition adds?
+            if query.vars.iter().all(|v| match v {
+                Fixed(_) => true,
+                Free(_) => false,
+            }) {
+                Ok(Some(self.filter_exact_match(query)))
+            } else {
+                let results = self.select(query);
+                Ok(Some(results))
             }
-            Ok(Some(results))
+        } else {
+            println!("halp");
+            Ok(None)
         }
     }
 }
@@ -109,7 +146,7 @@ mod tests {
     fn rule(head: Fact, facts: Vec<Fact>) -> Rule {
         Rule {
             head: head,
-            body: facts.into_iter().map(|e| BodyExpression::Fact(e)).collect()
+            body: facts.into_iter().map(|e| BodyExpression::Fact(e)).collect(),
         }
     }
 
@@ -227,7 +264,8 @@ mod tests {
         e.push_fact(fact("foo", vec!["a"])).unwrap();
         e.push_fact(fact("foo", vec!["b"])).unwrap();
         e.push_fact(fact("foo", vec!["c"])).unwrap();
-        e.push_rule(rule(fact("bar", vec!["X"]), vec![fact("foo", vec!["X"])])).unwrap();
+        e.push_rule(rule(fact("bar", vec!["X"]), vec![fact("foo", vec!["X"])]))
+            .unwrap();
 
         let q = query("edge", vec!["a", "X"]);
 
