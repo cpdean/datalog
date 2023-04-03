@@ -10,7 +10,7 @@ rustyline = "4.1.0"
 regex = "1.1.7"
 # instead of implementing relational algebra myself...
 rusqlite = "0.20.0"
-time = "0.1.42"
+time = "0.2.0"
 
 [[bin]]
 path = "src/main.rs"
